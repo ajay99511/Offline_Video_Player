@@ -1,0 +1,5 @@
+{
+  "name": "Local Media Player",
+  "description": "A fully functional offline video player for web. Features gesture controls for volume, brightness, and seeking, plus playback speed and zoom modes. Uses the File API to play local content.",
+  "requestFramePermissions": []
+}
