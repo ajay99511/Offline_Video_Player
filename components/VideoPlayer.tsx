@@ -25,6 +25,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
   const lastTapRef = useRef<{ time: number; x: number } | null>(null);
   const initialValueRef = useRef<number>(0);
   const pinchStartDistRef = useRef<number>(0);
+  const targetSeekTimeRef = useRef<number>(0);
   
   const [state, setState] = useState<PlayerState>({
     isPlaying: false,
@@ -133,7 +134,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
            const seekAmount = isLeft ? -10 : 10;
            handleSeek(Math.min(Math.max(state.currentTime + seekAmount, 0), state.duration));
            setGestureType('SEEK');
-           setGestureValue(0);
+           setGestureValue(state.currentTime + seekAmount);
            setGestureText(seekAmount > 0 ? '+10s' : '-10s');
            
            setTimeout(() => setGestureType('NONE'), 500);
@@ -159,7 +160,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (gestureType === 'SEEK' && !touchStartRef.current) return; // Ignore move if already double-tap seeking
+    if (gestureType === 'SEEK' && !touchStartRef.current && e.touches.length === 1) return;
 
     if (e.touches.length === 2 && gestureType === 'ZOOM') {
        // Pinch zoom logic
@@ -169,7 +170,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
       );
       const scaleFactor = dist / pinchStartDistRef.current;
       const newScale = Math.min(Math.max(initialValueRef.current * scaleFactor, 0.5), 3.0);
-      setState(s => ({ ...s, scale: newScale, zoomMode: ZoomMode.ZOOM_150 })); // Switch to custom zoom
+      setState(s => ({ ...s, scale: newScale, zoomMode: ZoomMode.ZOOM_150 }));
       setGestureValue(newScale);
       return;
     }
@@ -180,7 +181,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
       const dy = touchStartRef.current.y - touch.clientY; // Up is positive
 
       // If gesture not locked yet, determine direction
-      if (gestureType === 'NONE' || gestureType === 'ZOOM') { // Allow overriding zoom? no.
+      if (gestureType === 'NONE' || gestureType === 'ZOOM') {
         if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
           setGestureType('SEEK');
           initialValueRef.current = state.currentTime;
@@ -203,14 +204,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
         const change = dy / (window.innerHeight / 2);
         const newVal = Math.min(Math.max(initialValueRef.current + change, 0.2), 1.5); // Min 0.2 brightness, Max 1.5
         setState(s => ({ ...s, brightness: newVal }));
-        setGestureValue(newVal / 1.5); // Normalize for display
+        setGestureValue(newVal / 1.5); // Normalize for display (0-1 approx)
       } else if (gestureType === 'SEEK') {
         const changeS = (dx / window.innerWidth) * 90; // Full width swipe = 90 seconds
-        const newVal = Math.min(Math.max(initialValueRef.current + changeS, 0), state.duration);
-        
-        // Don't actually seek video until end, just show UI
-        setGestureValue(newVal);
-        const diff = newVal - initialValueRef.current;
+        const target = Math.min(Math.max(initialValueRef.current + changeS, 0), state.duration);
+        targetSeekTimeRef.current = target;
+        setGestureValue(target); 
+        const diff = target - initialValueRef.current;
         setGestureText(`${diff > 0 ? '+' : ''}${Math.round(diff)}s`);
       }
     }
@@ -218,115 +218,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
 
   const handleTouchEnd = () => {
      if (gestureType === 'SEEK') {
-        // Commit seek
-        if (touchStartRef.current) {
-           const touch = touchStartRef.current; // we use the calculated value from move actually.
-           // Recalculate based on last gestureText parsing or store it in ref? 
-           // Simpler: Just parse the text or use the initial + delta.
-           // However, let's just use the current logic:
-           // We didn't store the final seek target in state.currentTime to avoid jittery video.
-           // We need to apply it now.
-           // Let's rely on gestureText parsing for simplicity here or better, reconstruct.
-        }
-        // Since we didn't update state.currentTime during swipe (for performance/smoothness), we do it now.
-        // But we didn't save the target in a ref. 
-        // Let's cheat slightly and parse gestureText or just accept that we need to store 'targetSeekTime' in a ref.
-        // To keep it simple, I'll rely on the visual feedback for now, but in a real app, I'd track targetTimeRef.
-        // Wait, let's fix the move logic to be robust.
-     }
-     
-     // Actually, let's handle the seek commit in a simpler way:
-     // If we are seeking, we updated the gesture text. 
-     // Let's just reset for now. Implementing perfect seek on drag requires updating video.currentTime on drag 
-     // or a 'preview' time.
-     
-     if (gestureType === 'SEEK') {
-         // If we are in seek mode from a swipe
-         if (touchStartRef.current) {
-            // Re-calculate one last time
-            // Ideally we track the `targetTime` in a ref during move.
-            // Let's assume we didn't for this compact code and just clear.
-            // Correct implementation for the future: add targetSeekTimeRef.
+         if (videoRef.current) {
+             videoRef.current.currentTime = targetSeekTimeRef.current;
+             setState(s => ({...s, currentTime: targetSeekTimeRef.current}));
          }
      }
-
-     // Reset
+     
      touchStartRef.current = null;
      setGestureType('NONE');
      setGestureText('');
-  };
-  
-  // Re-implement SEEK logic correctly for drag
-  const targetSeekTimeRef = useRef<number>(0);
-  
-  const handleTouchMoveFixed = (e: React.TouchEvent) => {
-      // ... existing checks ...
-      if (gestureType === 'SEEK' && !touchStartRef.current && e.touches.length === 1) return;
-      
-      // Copy paste logic from above but add targetSeekTimeRef update
-      if (e.touches.length === 1 && touchStartRef.current) {
-         const touch = e.touches[0];
-         const dx = touch.clientX - touchStartRef.current.x;
-         const dy = touchStartRef.current.y - touch.clientY;
-
-         if (gestureType === 'NONE' || gestureType === 'ZOOM') {
-            if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
-                setGestureType('SEEK');
-                initialValueRef.current = state.currentTime;
-            } else if (Math.abs(dy) > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
-                const screenWidth = window.innerWidth;
-                const isLeft = touchStartRef.current.x < screenWidth / 2;
-                setGestureType(isLeft ? 'BRIGHTNESS' : 'VOLUME');
-            }
-         }
-
-         if (gestureType === 'VOLUME') {
-            const change = dy / (window.innerHeight / 2);
-            const newVal = Math.min(Math.max(initialValueRef.current + change, 0), 1);
-            if (videoRef.current) videoRef.current.volume = newVal;
-            setState(s => ({ ...s, volume: newVal }));
-            setGestureValue(newVal);
-         } else if (gestureType === 'BRIGHTNESS') {
-            const change = dy / (window.innerHeight / 2);
-            const newVal = Math.min(Math.max(initialValueRef.current + change, 0.2), 1.5);
-            setState(s => ({ ...s, brightness: newVal }));
-            setGestureValue(newVal);
-         } else if (gestureType === 'SEEK') {
-            const changeS = (dx / window.innerWidth) * 90;
-            const target = Math.min(Math.max(initialValueRef.current + changeS, 0), state.duration);
-            targetSeekTimeRef.current = target;
-            setGestureValue(target); // Used for progress bar visual if we had one in overlay
-            const diff = target - initialValueRef.current;
-            setGestureText(`${diff > 0 ? '+' : ''}${Math.round(diff)}s`);
-            
-            // Optional: Live seek
-            // if (videoRef.current) videoRef.current.currentTime = target;
-         }
-      }
-      
-      // Pinch
-      if (e.touches.length === 2 && gestureType === 'ZOOM') {
-          const dist = Math.hypot(
-            e.touches[0].clientX - e.touches[1].clientX,
-            e.touches[0].clientY - e.touches[1].clientY
-          );
-          const scaleFactor = dist / pinchStartDistRef.current;
-          const newScale = Math.min(Math.max(initialValueRef.current * scaleFactor, 0.5), 3.0);
-          setState(s => ({ ...s, scale: newScale, zoomMode: ZoomMode.ZOOM_150 }));
-          setGestureValue(newScale);
-      }
-  };
-
-  const handleTouchEndFixed = () => {
-      if (gestureType === 'SEEK') {
-          if (videoRef.current) {
-              videoRef.current.currentTime = targetSeekTimeRef.current;
-              setState(s => ({...s, currentTime: targetSeekTimeRef.current}));
-          }
-      }
-      touchStartRef.current = null;
-      setGestureType('NONE');
-      setGestureText('');
   };
 
   return (
@@ -334,8 +234,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
       ref={containerRef}
       className="relative w-full h-full bg-black overflow-hidden select-none touch-none"
       onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMoveFixed}
-      onTouchEnd={handleTouchEndFixed}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onClick={() => setControlsVisible(!controlsVisible)}
     >
       <video
@@ -354,10 +254,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onBack }) => {
       />
 
       {/* Overlays */}
-      <GestureOverlay type={gestureType} value={gestureValue} text={gestureText} />
+      <GestureOverlay 
+        type={gestureType} 
+        value={gestureValue} 
+        text={gestureText} 
+        duration={state.duration}
+      />
 
       <PlayerControls
-        isVisible={controlsVisible && gestureType === 'NONE'} // Hide controls during gesture
+        isVisible={controlsVisible && gestureType === 'NONE'}
         state={state}
         title={video.name}
         onPlayPause={togglePlay}
